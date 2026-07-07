@@ -3,10 +3,10 @@ module go.f0o.dev/version-intercept/router/connect
 go 1.26
 
 require (
-	connectrpc.com/connect v1.18.1
-	go.f0o.dev/version-intercept v0.0.0
+	connectrpc.com/connect v1.20.0
 	github.com/prometheus/client_golang v1.23.2
-	google.golang.org/protobuf v1.36.8
+	go.f0o.dev/version-intercept v0.0.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
