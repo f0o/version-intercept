@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+// Package greeter.v1 is the T0 (1.0-era) snapshot of the Greeter contract as an
+// OLD client generated it. It is annotated with service_versioning{max:"1.0"},
+// so any client generated from THIS file carries "1.0" baked into its
+// descriptor and auto-pins to microversion 1.0 at runtime. It predates the 2.0
+// title/language request fields, the served_by response field, and the Farewell
+// method, so an old client physically cannot name them. The proto package name
+// and wire path match the modern snapshot and the server contract, so an ancient
+// client built from this schema is wire-compatible with the modern server.
+package greeter.v1;
+
+import "versionintercept/annotations/v1/annotations.proto";
+
+// GreeterService as it existed at microversion 1.0: a single Hello method. Its
+// service_versioning max is 1.0 — the newest version this frozen codebase knows.
+service GreeterService {
+  option (versionintercept.annotations.v1.service_versioning) = {
+    min: "1.0"
+    max: "1.0"
+  };
+
+  // Hello returns the original plain greeting. Available since 1.0 and the only
+  // method an old client can even name.
+  rpc Hello(HelloRequest) returns (HelloResponse) {
+    option (versionintercept.annotations.v1.method_versioning) = {introduced_in: "1.0"};
+  }
+}
+
+// HelloRequest as it existed at 1.0: just a name. An old client physically
+// cannot set title or language because those fields do not exist here.
+message HelloRequest {
+  string name = 1;
+}
+
+// HelloResponse as it existed at 1.0: just a message. The modern server's
+// served_by field (number 2) is unknown here and is dropped on decode.
+message HelloResponse {
+  string message = 1;
+}

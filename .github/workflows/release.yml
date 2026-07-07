@@ -1,0 +1,66 @@
+name: Release
+
+# Multi-module tag strategy
+# -------------------------
+# Each Go module in this repository is versioned and tagged independently, per
+# the Go module tooling convention for modules in subdirectories:
+#
+#   Core (module root):   vX.Y.Z              e.g. v0.1.0
+#   router/connect:       router/connect/vX.Y.Z
+#   router/grpc:          router/grpc/vX.Y.Z
+#   autopin/connect:      autopin/connect/vX.Y.Z
+#   autopin/grpc:         autopin/grpc/vX.Y.Z
+#
+# Pushing any such tag triggers this workflow, which resolves the module the tag
+# belongs to, verifies it builds and tests cleanly, then publishes a GitHub
+# Release for the tag.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "router/connect/v*.*.*"
+      - "router/grpc/v*.*.*"
+      - "autopin/connect/v*.*.*"
+      - "autopin/grpc/v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Verify & publish release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          check-latest: true
+
+      - name: Resolve module directory from tag
+        id: mod
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          # Strip the trailing /vX.Y.Z to recover the module directory; a bare
+          # vX.Y.Z tag maps to the repository root (".").
+          if [[ "$tag" == v*.*.* ]]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=${tag%/v*}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify tagged module builds and tests
+        working-directory: ${{ steps.mod.outputs.dir }}
+        run: |
+          go build ./...
+          go vet ./...
+          go test -race ./...
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

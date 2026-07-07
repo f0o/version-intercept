@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+// Package versionintercept.annotations.v1 defines reusable microversion
+// annotations for go.f0o.dev/version-intercept. Any gRPC/ConnectRPC service
+// can import these options to declare, inline in its .proto, the microversion
+// lifecycle of the service, its methods, and its fields. The version-intercept
+// router and interceptor read these options at runtime to route behavior, gate
+// fields, and enforce method lifecycles (OpenStack microversion style).
+package versionintercept.annotations.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// ServiceVersioning declares the inclusive microversion window a service
+// supports. Values are "major.minor" strings.
+message ServiceVersioning {
+  string min = 1;
+  string max = 2;
+}
+
+// MethodVersioning declares the microversion lifecycle of a method. A method is
+// callable when the negotiated microversion is >= introduced_in and, when set,
+// < removed_in. deprecated_in marks the version at (and after) which callers are
+// warned via a response header.
+message MethodVersioning {
+  string introduced_in = 1;
+  string deprecated_in = 2;
+  string removed_in = 3;
+}
+
+// FieldVersioning declares the microversion lifecycle of a field. Fields whose
+// introduced_in is newer than the negotiated microversion are cleared from both
+// requests and responses; fields at/after removed_in are likewise cleared.
+message FieldVersioning {
+  string introduced_in = 1;
+  string removed_in = 2;
+}
+
+extend google.protobuf.ServiceOptions {
+  ServiceVersioning service_versioning = 50001;
+}
+
+extend google.protobuf.MethodOptions {
+  MethodVersioning method_versioning = 50002;
+}
+
+extend google.protobuf.FieldOptions {
+  FieldVersioning field_versioning = 50003;
+}

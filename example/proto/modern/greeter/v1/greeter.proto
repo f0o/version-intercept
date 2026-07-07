@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+// Package greeter.v1 is the T2 (2.1-era) snapshot of the Greeter contract as an
+// up-to-date client generated it. It is annotated with
+// service_versioning{max:"2.1"}, so any client generated from THIS file carries
+// "2.1" baked into its descriptor and auto-pins to microversion 2.1 at runtime.
+// It adds the 2.0 title/language request fields, the served_by response field,
+// and the Farewell method. The proto package name and wire path match the legacy
+// snapshot and the server contract, so all three interoperate on the wire.
+package greeter.v1;
+
+import "versionintercept/annotations/v1/annotations.proto";
+
+// GreeterService is the full versioned greeting API as a modern client sees it.
+// Its service_versioning max is 2.1 — the newest version this codebase knows.
+service GreeterService {
+  option (versionintercept.annotations.v1.service_versioning) = {
+    min: "1.0"
+    max: "2.1"
+  };
+
+  // Hello returns a greeting. The title and language request fields (and the
+  // served_by response field) are honored by the server from microversion 2.0.
+  rpc Hello(HelloRequest) returns (HelloResponse) {
+    option (versionintercept.annotations.v1.method_versioning) = {introduced_in: "1.0"};
+  }
+
+  // Farewell returns a parting message. Introduced at microversion 2.0.
+  rpc Farewell(FarewellRequest) returns (FarewellResponse) {
+    option (versionintercept.annotations.v1.method_versioning) = {introduced_in: "2.0"};
+  }
+
+  // HelloStream returns a stream of greetings. Introduced at microversion 2.1.
+  rpc HelloStream(HelloStreamRequest) returns (stream HelloStreamResponse) {
+    option (versionintercept.annotations.v1.method_versioning) = {introduced_in: "2.1"};
+  }
+}
+
+// HelloRequest carries the greeting inputs, including the 2.0 title and
+// language fields.
+message HelloRequest {
+  string name = 1;
+  string title = 2 [(versionintercept.annotations.v1.field_versioning) = {introduced_in: "2.0"}];
+  string language = 3 [(versionintercept.annotations.v1.field_versioning) = {introduced_in: "2.0"}];
+}
+
+// HelloResponse carries the rendered greeting and the serving microversion.
+message HelloResponse {
+  string message = 1;
+  string served_by = 2 [(versionintercept.annotations.v1.field_versioning) = {introduced_in: "2.0"}];
+}
+
+// FarewellRequest carries the name to bid farewell (2.0+).
+message FarewellRequest {
+  string name = 1;
+}
+
+// FarewellResponse carries the parting message (2.0+).
+message FarewellResponse {
+  string message = 1;
+}
+
+// HelloStreamRequest carries the streaming greeting inputs (2.1+). It mirrors
+// HelloRequest and adds repeat, the number of greetings to stream back.
+message HelloStreamRequest {
+  string name = 1;
+  string title = 2 [(versionintercept.annotations.v1.field_versioning) = {introduced_in: "2.0"}];
+  string language = 3 [(versionintercept.annotations.v1.field_versioning) = {introduced_in: "2.0"}];
+  int32 repeat = 4;
+}
+
+// HelloStreamResponse carries one streamed greeting (2.1+). served_by is only
+// populated from microversion 2.0 and newer.
+message HelloStreamResponse {
+  string message = 1;
+  string served_by = 2 [(versionintercept.annotations.v1.field_versioning) = {introduced_in: "2.0"}];
+  int32 sequence = 3;
+}

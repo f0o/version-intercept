@@ -1,0 +1,13 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: go.f0o.dev/version-intercept/example/gen-legacy
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: ../../gen-legacy
+    opt: paths=source_relative
+  - remote: buf.build/connectrpc/go
+    out: ../../gen-legacy
+    opt: paths=source_relative
