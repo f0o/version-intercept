@@ -27,7 +27,7 @@ Closes #
 - [ ] `autopin/connect`
 - [ ] `autopin/grpc`
 - [ ] `example`
-- [ ] `proto/` (BSR: `buf.build/f0o/version-intercept`)
+- [ ] `proto/` (BSR: `buf.build/f0o-dev/version-intercept`)
 
 ## Checklist
 

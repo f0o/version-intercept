@@ -74,7 +74,7 @@ jobs:
           token: ${{ secrets.BUF_TOKEN }}
           lint: true
           format: true
-          breaking: true
+          breaking: false
           push: true
           cache: true
           github_token: ${{ secrets.GITHUB_TOKEN }}

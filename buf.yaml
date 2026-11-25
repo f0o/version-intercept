@@ -1,7 +1,7 @@
 version: v2
 modules:
   - path: proto
-    name: buf.build/f0o/version-intercept
+    name: buf.build/f0o-dev/version-intercept
 lint:
   use:
     - STANDARD
