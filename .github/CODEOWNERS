@@ -1,0 +1,10 @@
+# Default repository owner
+* @f0o
+
+# Protobuf schema and BSR configuration
+/proto/ @f0o
+/buf.yaml @f0o
+/buf.gen.yaml @f0o
+
+# CI/CD workflows and release automation
+/.github/ @f0o

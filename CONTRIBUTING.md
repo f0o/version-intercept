@@ -37,10 +37,19 @@ make demo           # run the end-to-end example
 
 1. Fork the repo and create a topic branch.
 2. Make your change in small, focused commits.
-3. Update `README.md` if you changed externally-observable behavior (config,
-   commands, tools, defaults).
-4. Ensure `go build`, `go vet`, `go test -race`, and `gofmt -l .` are all clean.
-5. Open a PR describing the motivation and the change.
+3. Use a [Conventional Commits](https://www.conventionalcommits.org/) PR title
+   (e.g. `feat(router): ...`, `fix(autopin): ...`, `docs: ...`); PR titles are
+   validated automatically and used to categorize release notes.
+4. Update `README.md` and `CHANGELOG.md` if you changed externally-observable
+   behavior (config, commands, tools, defaults).
+5. Ensure `go build`, `go vet`, `go test -race`, and `gofmt -l .` are all clean.
+6. If you edit `.proto` files, run `buf lint`, `buf format -d --exit-code`, and
+   `make generate`. Intentional breaking proto changes require the
+   `buf skip breaking` PR label.
+7. Open a PR describing the motivation and the change.
+
+For maintainers cutting releases or managing Buf Schema Registry (BSR)
+publishing, see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## License
 

@@ -1,19 +1,22 @@
 name: Release
 
-# Multi-module tag strategy
-# -------------------------
+# Multi-module release & BSR tag publishing
+# -----------------------------------------
 # Each Go module in this repository is versioned and tagged independently, per
 # the Go module tooling convention for modules in subdirectories:
 #
-#   Core (module root):   vX.Y.Z              e.g. v0.1.0
+#   Core (module root):   vX.Y.Z              e.g. v0.1.0 (also publishes BSR label)
 #   router/connect:       router/connect/vX.Y.Z
 #   router/grpc:          router/grpc/vX.Y.Z
 #   autopin/connect:      autopin/connect/vX.Y.Z
 #   autopin/grpc:         autopin/grpc/vX.Y.Z
 #
-# Pushing any such tag triggers this workflow, which resolves the module the tag
-# belongs to, verifies it builds and tests cleanly, then publishes a GitHub
-# Release for the tag.
+# Pushing any such tag verifies the module (and runs core coverage + E2E demo
+# for core tags), publishes the core BSR tag label using secrets.BUF_TOKEN when
+# applicable, creates the GitHub Release, and warms proxy.golang.org.
+#
+# Running via workflow_dispatch performs a dry-run verification of the target
+# tag format and module checks without publishing to BSR or GitHub Releases.
 
 on:
   push:
@@ -23,17 +26,94 @@ on:
       - "router/grpc/v*.*.*"
       - "autopin/connect/v*.*.*"
       - "autopin/grpc/v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Dry-run target tag to validate (e.g. v0.1.0 or router/connect/v0.1.0)"
+        required: true
+        type: string
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  release:
-    name: Verify & publish release
+  verify:
+    name: Verify release readiness
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      dir: ${{ steps.meta.outputs.dir }}
+      module_path: ${{ steps.meta.outputs.module_path }}
+      version: ${{ steps.meta.outputs.version }}
+      is_core: ${{ steps.meta.outputs.is_core }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate release metadata
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="$REF_NAME"
+          fi
+
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            dir="."
+            version="$tag"
+            module_path="go.f0o.dev/version-intercept"
+            is_core="true"
+          elif [[ "$tag" =~ ^(router/(connect|grpc)|autopin/(connect|grpc))/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            dir="${tag%/v*}"
+            version="${tag##*/}"
+            module_path="go.f0o.dev/version-intercept/${dir}"
+            is_core="false"
+          else
+            echo "ERROR: Invalid release tag '$tag'."
+            echo "Expected vX.Y.Z or <adapter>/vX.Y.Z where <adapter> is router/connect, router/grpc, autopin/connect, or autopin/grpc."
+            exit 1
+          fi
+
+          if [[ "$version" == *-* ]]; then
+            prerelease="true"
+          else
+            prerelease="false"
+          fi
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            git fetch --no-tags origin main
+            if ! git merge-base --is-ancestor HEAD origin/main; then
+              echo "ERROR: Tag '$tag' does not point to an ancestor of origin/main."
+              exit 1
+            fi
+          fi
+
+          if [ "$is_core" = "false" ]; then
+            if grep -qE '^\s*go\.f0o\.dev/version-intercept\s+v0\.0\.0(\s|$)' "${dir}/go.mod"; then
+              echo "ERROR: ${dir}/go.mod still requires go.f0o.dev/version-intercept v0.0.0."
+              echo "Release the core module first, update ${dir}/go.mod to the released core version via PR, then tag ${tag}."
+              exit 1
+            fi
+          fi
+
+          {
+            echo "tag=${tag}"
+            echo "dir=${dir}"
+            echo "module_path=${module_path}"
+            echo "version=${version}"
+            echo "is_core=${is_core}"
+            echo "prerelease=${prerelease}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -41,26 +121,88 @@ jobs:
           go-version: "1.26"
           check-latest: true
 
-      - name: Resolve module directory from tag
-        id: mod
+      - name: Verify gofmt
+        working-directory: ${{ steps.meta.outputs.dir }}
         run: |
-          tag="${GITHUB_REF_NAME}"
-          # Strip the trailing /vX.Y.Z to recover the module directory; a bare
-          # vX.Y.Z tag maps to the repository root (".").
-          if [[ "$tag" == v*.*.* ]]; then
-            echo "dir=." >> "$GITHUB_OUTPUT"
-          else
-            echo "dir=${tag%/v*}" >> "$GITHUB_OUTPUT"
+          fmt_out="$(gofmt -l .)"
+          if [ -n "$fmt_out" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$fmt_out"
+            exit 1
           fi
 
       - name: Verify tagged module builds and tests
-        working-directory: ${{ steps.mod.outputs.dir }}
+        working-directory: ${{ steps.meta.outputs.dir }}
         run: |
-          go build ./...
           go vet ./...
+          go build ./...
           go test -race ./...
+
+      - name: Run core coverage gate and E2E demo
+        if: steps.meta.outputs.is_core == 'true'
+        run: |
+          make cover
+          make demo
+
+  publish-bsr:
+    name: Publish BSR tag label
+    needs: verify
+    if: github.event_name == 'push' && needs.verify.outputs.is_core == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify BUF_TOKEN secret is configured
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: |
+          if [ -z "$BUF_TOKEN" ]; then
+            echo "ERROR: Repository secret BUF_TOKEN is not set. See docs/RELEASING.md for BSR token setup."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push tag label to BSR
+        uses: bufbuild/buf-action@v1
+        with:
+          token: ${{ secrets.BUF_TOKEN }}
+          lint: true
+          format: true
+          breaking: true
+          push: true
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [verify, publish-bsr]
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      needs.verify.result == 'success' &&
+      (needs.publish-bsr.result == 'success' || needs.publish-bsr.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.verify.outputs.tag }}
           generate_release_notes: true
+          prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.verify.outputs.is_core == 'true' && needs.verify.outputs.prerelease != 'true' }}
+
+      - name: Warm Go module proxy
+        env:
+          MODULE_PATH: ${{ needs.verify.outputs.module_path }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          curl -fsS "https://proxy.golang.org/${MODULE_PATH}/@v/${VERSION}.info" >/dev/null || true

@@ -1,0 +1,65 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
+change-title-escapes: '\<*_&'
+version-resolver:
+  major:
+    labels:
+      - major
+      - breaking
+      - breaking-change
+  minor:
+    labels:
+      - minor
+      - enhancement
+      - feat
+      - feature
+  patch:
+    labels:
+      - patch
+      - bug
+      - fix
+  default: patch
+exclude-labels:
+  - ignore-for-release
+  - skip-changelog
+categories:
+  - title: Breaking Changes
+    labels:
+      - breaking
+      - breaking-change
+  - title: Features
+    labels:
+      - enhancement
+      - feat
+      - feature
+  - title: Bug Fixes
+    labels:
+      - bug
+      - fix
+  - title: Protobuf & BSR
+    labels:
+      - proto
+      - protobuf
+      - bsr
+  - title: Documentation
+    labels:
+      - documentation
+      - docs
+  - title: Maintenance & Dependencies
+    labels:
+      - chore
+      - ci
+      - dependencies
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  ---
+
+  ### Release Checklist
+  - [ ] Core `CHANGELOG.md` updated and merged to `main`
+  - [ ] Tag core (`git tag -s v$RESOLVED_VERSION -m "v$RESOLVED_VERSION"`) and push tag to trigger BSR + GitHub Release
+  - [ ] For adapter releases, bump `go.f0o.dev/version-intercept` in each adapter `go.mod` via PR before tagging `<adapter>/vX.Y.Z`
+  - [ ] See `docs/RELEASING.md` for full multi-module and BSR instructions

@@ -1,0 +1,80 @@
+name: Buf CI & BSR
+
+# Protobuf validation and Buf Schema Registry (BSR) publishing via BUF_TOKEN.
+# - Pull requests run build, lint, format, and breaking checks (no BSR push).
+# - Pushes to main publish the `main` BSR label using secrets.BUF_TOKEN.
+# - Core release tags (`v*.*.*`) are published to BSR by `release.yml` only
+#   after Go build/vet/test/coverage/demo verification passes.
+# - Branch/tag deletions archive matching BSR labels automatically.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  delete:
+
+permissions: {}
+
+concurrency:
+  group: buf-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  buf-pr:
+    name: Proto lint, format & breaking check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Buf checks
+        uses: bufbuild/buf-action@v1
+        with:
+          lint: true
+          format: true
+          breaking: true
+          push: false
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  buf-publish:
+    name: Verify & publish to BSR
+    if: github.event_name == 'push' || github.event_name == 'delete'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify BUF_TOKEN secret is configured
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: |
+          if [ -z "$BUF_TOKEN" ]; then
+            echo "ERROR: Repository secret BUF_TOKEN is not set. See docs/RELEASING.md for BSR token setup."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Buf checks & publish to BSR
+        uses: bufbuild/buf-action@v1
+        with:
+          token: ${{ secrets.BUF_TOKEN }}
+          lint: true
+          format: true
+          breaking: true
+          push: true
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
