@@ -33,7 +33,7 @@ func TestInterceptorRecoversPanic(t *testing.T) {
 	}
 	ic := VersioningInterceptor(WithMetrics(m))
 
-	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
+	next := connect.ServerFunc(func(_ context.Context, _ connect.Spec, _ connect.ServerStream) error {
 		panic("boom")
 	})
 
@@ -55,7 +55,7 @@ func TestInterceptorRecoversPanic(t *testing.T) {
 func TestInterceptorNoVersionPassesThrough(t *testing.T) {
 	ic := VersioningInterceptor()
 	called := false
-	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
+	next := connect.ServerFunc(func(_ context.Context, _ connect.Spec, _ connect.ServerStream) error {
 		called = true
 		return nil
 	})

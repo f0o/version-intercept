@@ -129,12 +129,6 @@ func fixtureService(t *testing.T) protoreflect.ServiceDescriptor {
 	return buildFixtureFile(t).Services().ByName("GreeterService")
 }
 
-// fixtureMethod returns the named method descriptor from the fixture service.
-func fixtureMethod(t *testing.T, name string) protoreflect.MethodDescriptor {
-	t.Helper()
-	return fixtureService(t).Methods().ByName(protoreflect.Name(name))
-}
-
 // newFixtureMessage creates a dynamic message for the named fixture message type
 // and sets the provided string fields by name.
 //

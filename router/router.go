@@ -102,17 +102,17 @@ func (r *Router) recomputeRange() {
 		r.hasRange = false
 		return
 	}
-	min := r.registrations[0].rng.Min
-	max := r.registrations[0].version
+	minVer := r.registrations[0].rng.Min
+	maxVer := r.registrations[0].version
 	for _, reg := range r.registrations[1:] {
-		if reg.rng.Min.LessThan(min) {
-			min = reg.rng.Min
+		if reg.rng.Min.LessThan(minVer) {
+			minVer = reg.rng.Min
 		}
-		if max.LessThan(reg.version) {
-			max = reg.version
+		if maxVer.LessThan(reg.version) {
+			maxVer = reg.version
 		}
 	}
-	r.aggMin, r.aggMax, r.hasRange = min, max, true
+	r.aggMin, r.aggMax, r.hasRange = minVer, maxVer, true
 }
 
 // SupportedRange reports the aggregate minimum and maximum versions currently
@@ -193,9 +193,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // writeSupportHeaders advertises the aggregate supported version range.
 func (r *Router) writeSupportHeaders(w http.ResponseWriter) {
-	if min, max, ok := r.SupportedRange(); ok {
-		w.Header().Set(r.header.MinHeader, min.String())
-		w.Header().Set(r.header.MaxHeader, max.String())
+	if minVer, maxVer, ok := r.SupportedRange(); ok {
+		w.Header().Set(r.header.MinHeader, minVer.String())
+		w.Header().Set(r.header.MaxHeader, maxVer.String())
 	}
 }
 

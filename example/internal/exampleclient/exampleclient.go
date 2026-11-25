@@ -1,19 +1,15 @@
 // Package exampleclient holds helpers shared by the example client binaries:
-// an h2c dialer, the common connection constants, and ConnectRPC v2 client and
-// interceptor builders that auto-pin (or explicitly override) the microversion
-// via the autopinconnect client interceptor. It exists so the legacy and modern
-// example clients do not duplicate this wiring.
+// a cleartext HTTP/2 (h2c) HTTP client, common connection constants, and
+// ConnectRPC v2 client and interceptor builders that auto-pin (or explicitly
+// override) the microversion via the autopinconnect client interceptor. It
+// exists so the legacy and modern example clients do not duplicate this wiring.
 package exampleclient
 
 import (
-	"context"
-	"crypto/tls"
-	"net"
 	"net/http"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
-	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"go.f0o.dev/version-intercept/autopin"
@@ -30,36 +26,20 @@ const (
 	RequestHeader = "Api-Version"
 )
 
-// h2cDialer establishes a plain TCP connection for cleartext HTTP/2 (h2c),
-// bypassing TLS. It lets an http2.Transport talk to the h2c example server
-// without certificates.
-//
-// Arguments:
-//   - ctx: The dial context.
-//   - network: The network to dial (e.g. "tcp").
-//   - addr: The target address.
-//   - _: Unused TLS configuration required by the DialTLSContext signature.
-//
-// Returns the established connection or a dial error.
-func h2cDialer(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-	var d net.Dialer
-	return d.DialContext(ctx, network, addr)
-}
-
-// h2cBase returns an http2.Transport configured for cleartext h2c.
-//
-// Returns the base RoundTripper.
-func h2cBase() *http2.Transport {
-	return &http2.Transport{AllowHTTP: true, DialTLSContext: h2cDialer}
-}
-
-// HTTPClient returns an http.Client speaking cleartext h2c to the example
-// server. Microversion negotiation is handled by ConnectRPC client interceptors
-// (see AutoPinInterceptor / OverrideInterceptor), not by the transport.
+// HTTPClient returns an http.Client speaking cleartext HTTP/2 (h2c) to the
+// example server. Microversion negotiation is handled by ConnectRPC client
+// interceptors (see AutoPinInterceptor / OverrideInterceptor), not by the
+// transport.
 //
 // Returns the configured *http.Client.
 func HTTPClient() *http.Client {
-	return &http.Client{Transport: h2cBase()}
+	protocols := new(http.Protocols)
+	protocols.SetUnencryptedHTTP2(true)
+	return &http.Client{
+		Transport: &http.Transport{
+			Protocols: protocols,
+		},
+	}
 }
 
 // NewConnectClient constructs a ConnectRPC v2 client speaking cleartext h2c to

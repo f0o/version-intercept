@@ -78,17 +78,17 @@ func PinnedMaxVersion(sd protoreflect.ServiceDescriptor) (string, bool) {
 //
 // Returns the header value (e.g. "greeter 1.0") or "" when unavailable.
 func HeaderValue(service string, sd protoreflect.ServiceDescriptor) string {
-	max, ok := PinnedMaxVersion(sd)
+	maxVer, ok := PinnedMaxVersion(sd)
 	if !ok {
 		return ""
 	}
-	if !validVersion(max) {
+	if !validVersion(maxVer) {
 		return ""
 	}
 	if service != "" {
-		return service + " " + max
+		return service + " " + maxVer
 	}
-	return max
+	return maxVer
 }
 
 // AutoPinTransport wraps an http.RoundTripper so every request carries the

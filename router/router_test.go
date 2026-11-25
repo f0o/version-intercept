@@ -207,7 +207,7 @@ func TestRouterNoVersionsRegistered(t *testing.T) {
 
 // TestRouterConcurrentRegisterAndServe exercises the Router under the race
 // detector with concurrent registration and dispatch to prove thread-safety.
-func TestRouterConcurrentRegisterAndServe(t *testing.T) {
+func TestRouterConcurrentRegisterAndServe(_ *testing.T) {
 	r := newTestRouter()
 	var wg sync.WaitGroup
 

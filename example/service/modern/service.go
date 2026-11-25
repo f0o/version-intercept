@@ -69,7 +69,7 @@ func (s *Service) Hello(ctx context.Context, req *greeterv1.HelloRequest) (*gree
 //   - req: The FarewellRequest payload.
 //
 // Returns the FarewellResponse payload.
-func (s *Service) Farewell(ctx context.Context, req *greeterv1.FarewellRequest) (*greeterv1.FarewellResponse, error) {
+func (s *Service) Farewell(_ context.Context, req *greeterv1.FarewellRequest) (*greeterv1.FarewellResponse, error) {
 	name := req.GetName()
 	if name == "" {
 		name = "World"

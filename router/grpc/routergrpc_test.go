@@ -48,7 +48,7 @@ func TestUnaryRejectsUnavailableMethod(t *testing.T) {
 	ic := UnaryServerInterceptor(WithHeaderConfig(router.DefaultHeaderConfig("greeter")))
 
 	called := false
-	handler := func(ctx context.Context, req any) (any, error) {
+	handler := func(_ context.Context, _ any) (any, error) {
 		called = true
 		return nil, nil
 	}
@@ -70,7 +70,7 @@ func TestUnaryGatesRequestAndResponse(t *testing.T) {
 	reqMsg, _ := testfixture.NewMessage("HelloRequest", map[string]string{"name": "Ada", "title": "Dr."})
 	info := &grpc.UnaryServerInfo{FullMethod: "/routertest.v1.GreeterService/Hello"}
 
-	handler := func(ctx context.Context, req any) (any, error) {
+	handler := func(_ context.Context, _ any) (any, error) {
 		// title (2.0) must be gated at 1.0 before the handler sees it.
 		if testfixture.String(reqMsg, "title") != "" {
 			t.Errorf("request title not gated at 1.0: %q", testfixture.String(reqMsg, "title"))
@@ -94,7 +94,7 @@ func TestUnaryRecoversPanic(t *testing.T) {
 	info := &grpc.UnaryServerInfo{FullMethod: "/routertest.v1.GreeterService/Hello"}
 	reqMsg, _ := testfixture.NewMessage("HelloRequest", map[string]string{"name": "x"})
 
-	handler := func(ctx context.Context, req any) (any, error) { panic("boom") }
+	handler := func(_ context.Context, _ any) (any, error) { panic("boom") }
 
 	_, err := ic(ctxWithVersion("2.0"), reqMsg, info, handler)
 	if status.Code(err) != codes.Internal {
@@ -108,7 +108,7 @@ func TestUnaryNoMetadataPassesThrough(t *testing.T) {
 	info := &grpc.UnaryServerInfo{FullMethod: "/routertest.v1.GreeterService/Hello"}
 
 	called := false
-	handler := func(ctx context.Context, req any) (any, error) {
+	handler := func(_ context.Context, _ any) (any, error) {
 		called = true
 		return nil, nil
 	}

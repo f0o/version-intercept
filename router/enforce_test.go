@@ -49,7 +49,7 @@ func TestGateMessageKeepsNewFieldsAtNewVersion(t *testing.T) {
 }
 
 // TestGateMessageNil verifies GateMessage tolerates a nil message.
-func TestGateMessageNil(t *testing.T) {
+func TestGateMessageNil(_ *testing.T) {
 	GateMessage(nil, MustParseVersion("1.0"))
 }
 

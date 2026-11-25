@@ -15,7 +15,7 @@ import (
 func invokeUnary(t *testing.T, ic grpc.UnaryClientInterceptor) metadata.MD {
 	t.Helper()
 	var seen metadata.MD
-	invoker := func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
+	invoker := func(ctx context.Context, _ string, _, _ any, _ *grpc.ClientConn, _ ...grpc.CallOption) error {
 		md, _ := metadata.FromOutgoingContext(ctx)
 		seen = md
 		return nil

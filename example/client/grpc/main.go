@@ -86,7 +86,7 @@ func dial(opts ...autopingrpc.Option) *grpc.ClientConn {
 func demoAutoPinned() {
 	fmt.Println("=== auto-pinned 2.1 behavior (raw gRPC) ===")
 	conn := dial(autopingrpc.WithServiceToken(serviceToken))
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	client := greeterv1.NewGreeterServiceClient(conn)
 
 	if resp, err := client.Hello(context.Background(), &greeterv1.HelloRequest{
@@ -154,7 +154,7 @@ func demoHelloStream(client greeterv1.GreeterServiceClient) {
 func demoExplicitOverride() {
 	fmt.Println("\n=== explicit override to 1.0 (raw gRPC) ===")
 	conn := dial(autopingrpc.WithServiceToken(serviceToken), autopingrpc.WithVersion("1.0"))
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	client := greeterv1.NewGreeterServiceClient(conn)
 
 	resp, err := client.Hello(context.Background(), &greeterv1.HelloRequest{

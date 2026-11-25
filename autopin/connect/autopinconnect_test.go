@@ -13,10 +13,10 @@ import (
 	"go.f0o.dev/version-intercept/autopin"
 )
 
-func invoke(t *testing.T, ctx context.Context, ic connect.ClientInterceptor) string {
+func invoke(ctx context.Context, t *testing.T, ic connect.ClientInterceptor) string {
 	t.Helper()
 	var seen string
-	next := connect.ClientFunc(func(callCtx context.Context, spec connect.Spec) (connect.ClientStream, error) {
+	next := connect.ClientFunc(func(callCtx context.Context, _ connect.Spec) (connect.ClientStream, error) {
 		if info, ok := connect.CallInfoForClientContext(callCtx); ok {
 			seen = info.RequestHeader().Get(autopin.DefaultRequestHeader)
 		}
@@ -31,7 +31,7 @@ func invoke(t *testing.T, ctx context.Context, ic connect.ClientInterceptor) str
 
 func TestInterceptorSetsOverrideHeader(t *testing.T) {
 	ic := Interceptor(nil, WithServiceToken("greeter"), WithVersion("1.0"))
-	if got := invoke(t, context.Background(), ic); got != "greeter 1.0" {
+	if got := invoke(context.Background(), t, ic); got != "greeter 1.0" {
 		t.Errorf("Api-Version = %q, want %q", got, "greeter 1.0")
 	}
 }
@@ -41,7 +41,7 @@ func TestInterceptorPreservesExistingClientContext(t *testing.T) {
 	ctx, info := connect.NewClientContext(context.Background())
 	info.RequestHeader().Set("X-Trace", "abc")
 
-	if got := invoke(t, ctx, ic); got != "greeter 1.0" {
+	if got := invoke(ctx, t, ic); got != "greeter 1.0" {
 		t.Errorf("Api-Version = %q, want %q", got, "greeter 1.0")
 	}
 	if got := info.RequestHeader().Get("X-Trace"); got != "abc" {
@@ -54,14 +54,14 @@ func TestInterceptorPreservesExistingClientContext(t *testing.T) {
 
 func TestInterceptorBareVersionOverride(t *testing.T) {
 	ic := Interceptor(nil, WithVersion("2.1"))
-	if got := invoke(t, context.Background(), ic); got != "2.1" {
+	if got := invoke(context.Background(), t, ic); got != "2.1" {
 		t.Errorf("Api-Version = %q, want %q", got, "2.1")
 	}
 }
 
 func TestInterceptorNoVersionOmitsHeader(t *testing.T) {
 	ic := Interceptor(nil)
-	if got := invoke(t, context.Background(), ic); got != "" {
+	if got := invoke(context.Background(), t, ic); got != "" {
 		t.Errorf("Api-Version = %q, want empty", got)
 	}
 }

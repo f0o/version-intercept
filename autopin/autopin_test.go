@@ -24,13 +24,13 @@ import (
 //   - max: The service_versioning.max value to bake into the descriptor.
 //
 // Returns the constructed ServiceDescriptor.
-func serviceDescriptorWithMax(t *testing.T, max string) protoreflect.ServiceDescriptor {
+func serviceDescriptorWithMax(t *testing.T, maxVer string) protoreflect.ServiceDescriptor {
 	t.Helper()
 
 	svcOpts := &descriptorpb.ServiceOptions{}
 	proto.SetExtension(svcOpts, annotationsv1.E_ServiceVersioning, &annotationsv1.ServiceVersioning{
 		Min: "1.0",
-		Max: max,
+		Max: maxVer,
 	})
 
 	fdProto := &descriptorpb.FileDescriptorProto{

@@ -29,7 +29,7 @@ func New() *Service { return &Service{} }
 //   - req: The HelloRequest payload.
 //
 // Returns the HelloResponse payload.
-func (s *Service) Hello(ctx context.Context, req *greeterv1.HelloRequest) (*greeterv1.HelloResponse, error) {
+func (s *Service) Hello(_ context.Context, req *greeterv1.HelloRequest) (*greeterv1.HelloResponse, error) {
 	name := req.GetName()
 	if name == "" {
 		name = "World"

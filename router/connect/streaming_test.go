@@ -71,7 +71,7 @@ func TestHandlerRejectsUnavailableMethod(t *testing.T) {
 	ctx := router.WithNegotiatedVersion(context.Background(), router.Version{Major: 1})
 
 	called := false
-	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, s connect.ServerStream) error {
+	next := connect.ServerFunc(func(_ context.Context, _ connect.Spec, _ connect.ServerStream) error {
 		called = true
 		return nil
 	})
@@ -95,7 +95,7 @@ func TestStreamingHandlerGatesReceiveAndSend(t *testing.T) {
 	ctx := router.WithNegotiatedVersion(context.Background(), router.Version{Major: 1})
 	resp := fixtureMsg(t, "HelloResponse", map[string]string{"message": "hi", "served_by": "modern"})
 
-	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, s connect.ServerStream) error {
+	next := connect.ServerFunc(func(_ context.Context, _ connect.Spec, s connect.ServerStream) error {
 		got := fixtureMsg(t, "HelloRequest", nil)
 		if err := s.Receive(got); err != nil {
 			return err
@@ -132,7 +132,7 @@ func TestUnaryHandlerGatesReceiveAndSend(t *testing.T) {
 	}
 	ctx := router.WithNegotiatedVersion(context.Background(), router.Version{Major: 1})
 
-	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, s connect.ServerStream) error {
+	next := connect.ServerFunc(func(_ context.Context, _ connect.Spec, s connect.ServerStream) error {
 		got := fixtureMsg(t, "HelloRequest", nil)
 		if err := s.Receive(got); err != nil {
 			return err
@@ -162,7 +162,7 @@ func TestStreamingHandlerRecoversPanic(t *testing.T) {
 	stream := &fakeServerStream{spec: spec}
 	ctx := router.WithNegotiatedVersion(context.Background(), router.Version{Major: 2})
 
-	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, s connect.ServerStream) error {
+	next := connect.ServerFunc(func(_ context.Context, _ connect.Spec, _ connect.ServerStream) error {
 		panic("stream boom")
 	})
 

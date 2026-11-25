@@ -91,6 +91,7 @@ func run() error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	// #nosec G706 -- listen addresses are local server configuration
 	log.Printf("version-intercept greeter (gRPC) listening on %s (supported 1.0..2.1), metrics at %s/metrics", addr, metricsAddr)
 
 	serveErr := make(chan error, 1)

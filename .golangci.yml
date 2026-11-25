@@ -4,6 +4,7 @@ run:
   timeout: 5m
 
 linters:
+  default: none
   enable:
     - errcheck
     - govet
@@ -12,20 +13,38 @@ linters:
     - unused
     - misspell
     - revive
-    - gofmt
-    - goimports
     - unconvert
     - gocritic
+  exclusions:
+    generated: strict
+    rules:
+      # Generated protobuf/connect code is not subject to our lint rules.
+      - path: (gen/|example/gen-legacy/|example/gen-modern/)
+        linters:
+          - revive
+          - staticcheck
+          - gocritic
+          - misspell
+      # Secondary package files use file-focused doc comments per project GoDoc standards.
+      - path: router/(annotations|enforce|header|metrics|router)\.go
+        linters:
+          - revive
+        text: "package-comments:"
+      # Exported AutoPinTransport name is part of the public API.
+      - path: autopin/autopin\.go
+        linters:
+          - revive
+        text: "autopin\\.AutoPinTransport"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: strict
+    paths:
+      - (gen/|example/gen-legacy/|example/gen-modern/)
 
 issues:
-  exclude-rules:
-    # Generated protobuf/connect code is not subject to our lint rules.
-    - path: (gen/|example/gen-legacy/|example/gen-modern/)
-      linters:
-        - revive
-        - staticcheck
-        - gocritic
-        - misspell
-
   max-issues-per-linter: 0
   max-same-issues: 0

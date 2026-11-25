@@ -1,18 +1,18 @@
 module go.f0o.dev/version-intercept/autopin/grpc
 
-go 1.26
+go 1.26.0
 
 require (
 	go.f0o.dev/version-intercept v0.0.0
-	google.golang.org/grpc v1.68.1
-	google.golang.org/protobuf v1.36.8
+	google.golang.org/grpc v1.83.2
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
-	golang.org/x/net v0.29.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/text v0.18.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 )
 
 replace go.f0o.dev/version-intercept => ../../

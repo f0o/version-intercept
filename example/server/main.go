@@ -24,8 +24,6 @@ import (
 	"connectrpc.com/connect/v2/connecthttp"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 
 	"go.f0o.dev/version-intercept/example/gen-modern/greeter/v1/greeterv1connect"
 	"go.f0o.dev/version-intercept/example/service/legacy"
@@ -99,17 +97,23 @@ func run() error {
 		addr = v
 	}
 
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           h2c.NewHandler(mux, &http2.Server{}),
+		Handler:           mux,
+		Protocols:         protocols,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	min, max, _ := r.SupportedRange()
-	log.Printf("version-intercept greeter listening on %s (supported %s..%s) path %s, metrics at /metrics", addr, min, max, servicePath)
+	minVer, maxVer, _ := r.SupportedRange()
+	// #nosec G706 -- listen address is local server configuration
+	log.Printf("version-intercept greeter listening on %s (supported %s..%s) path %s, metrics at /metrics", addr, minVer, maxVer, servicePath)
 
 	serveErr := make(chan error, 1)
 	go func() {
