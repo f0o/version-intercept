@@ -1,18 +1,18 @@
 module go.f0o.dev/version-intercept/example
 
-go 1.26
+go 1.26.0
 
 require (
-	connectrpc.com/connect v1.18.1
+	connectrpc.com/connect/v2 v2.0.2
+	github.com/prometheus/client_golang v1.23.2
 	go.f0o.dev/version-intercept v0.0.0
 	go.f0o.dev/version-intercept/autopin/connect v0.0.0
 	go.f0o.dev/version-intercept/autopin/grpc v0.0.0
 	go.f0o.dev/version-intercept/router/connect v0.0.0
 	go.f0o.dev/version-intercept/router/grpc v0.0.0
-	github.com/prometheus/client_golang v1.23.2
 	golang.org/x/net v0.43.0
 	google.golang.org/grpc v1.68.1
-	google.golang.org/protobuf v1.36.8
+	google.golang.org/protobuf v1.36.11
 )
 
 require (

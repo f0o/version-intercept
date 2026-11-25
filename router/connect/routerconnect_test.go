@@ -1,13 +1,13 @@
-// interceptor_test.go verifies the ConnectRPC adapter's enforcement: panic
-// recovery mapping to CodeInternal, method-lifecycle rejection, no-version
-// passthrough, and opt-in metric recording.
+// routerconnect_test.go verifies the ConnectRPC v2 adapter's enforcement: panic
+// recovery mapping to CodeInternal, no-version passthrough, and metric/result
+// code labeling.
 package routerconnect
 
 import (
 	"context"
 	"testing"
 
-	"connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/protobuf/proto"
@@ -15,16 +15,6 @@ import (
 	"go.f0o.dev/version-intercept/router"
 	"go.f0o.dev/version-intercept/router/testfixture"
 )
-
-// unaryReq is a minimal connect.AnyRequest for exercising WrapUnary.
-type unaryReq struct {
-	connect.AnyRequest
-	procedure string
-	msg       proto.Message
-}
-
-func (r *unaryReq) Any() any           { return r.msg }
-func (r *unaryReq) Spec() connect.Spec { return connect.Spec{Procedure: r.procedure} }
 
 func mustMessage(t *testing.T, typeName string, fields map[string]string) proto.Message {
 	t.Helper()
@@ -35,21 +25,24 @@ func mustMessage(t *testing.T, typeName string, fields map[string]string) proto.
 	return m
 }
 
-func TestWrapUnaryRecoversPanic(t *testing.T) {
+func TestInterceptorRecoversPanic(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m, err := router.NewMetrics(reg)
 	if err != nil {
 		t.Fatalf("NewMetrics: %v", err)
 	}
-	i := &versioningInterceptor{metrics: m}
+	ic := VersioningInterceptor(WithMetrics(m))
 
-	next := connect.UnaryFunc(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
 		panic("boom")
 	})
 
 	ctx := router.WithNegotiatedVersion(context.Background(), router.Version{Major: 1})
-	req := &unaryReq{procedure: "/svc/Method", msg: mustMessage(t, "HelloRequest", map[string]string{"name": "x"})}
-	_, gotErr := i.WrapUnary(next)(ctx, req)
+	spec := connect.Spec{Procedure: "/svc/Method", StreamType: connect.StreamTypeUnary}
+	gotErr := ic(next)(ctx, spec, &fakeServerStream{
+		spec:     spec,
+		incoming: []proto.Message{mustMessage(t, "HelloRequest", map[string]string{"name": "x"})},
+	})
 
 	if gotErr == nil || connect.CodeOf(gotErr) != connect.CodeInternal {
 		t.Fatalf("recovered panic = %v, want CodeInternal", gotErr)
@@ -59,14 +52,15 @@ func TestWrapUnaryRecoversPanic(t *testing.T) {
 	}
 }
 
-func TestWrapUnaryNoVersionPassesThrough(t *testing.T) {
-	i := &versioningInterceptor{}
+func TestInterceptorNoVersionPassesThrough(t *testing.T) {
+	ic := VersioningInterceptor()
 	called := false
-	next := connect.UnaryFunc(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
 		called = true
-		return nil, nil
+		return nil
 	})
-	if _, err := i.WrapUnary(next)(context.Background(), &unaryReq{procedure: "/svc/Method"}); err != nil {
+	spec := connect.Spec{Procedure: "/svc/Method", StreamType: connect.StreamTypeUnary}
+	if err := ic(next)(context.Background(), spec, &fakeServerStream{spec: spec}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !called {
@@ -78,7 +72,7 @@ func TestResultCode(t *testing.T) {
 	if got := resultCode(nil); got != "ok" {
 		t.Errorf("resultCode(nil) = %q, want ok", got)
 	}
-	if got := resultCode(connect.NewError(connect.CodeUnimplemented, context.Canceled)); got != "unimplemented" {
+	if got := resultCode(connect.NewError(connect.CodeUnimplemented, "not implemented")); got != "unimplemented" {
 		t.Errorf("resultCode(unimplemented) = %q, want unimplemented", got)
 	}
 }

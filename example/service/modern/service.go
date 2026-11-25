@@ -9,9 +9,8 @@ import (
 	"fmt"
 	"strings"
 
-	"connectrpc.com/connect"
-
 	greeterv1 "go.f0o.dev/version-intercept/example/gen-modern/greeter/v1"
+	"go.f0o.dev/version-intercept/example/gen-modern/greeter/v1/greeterv1connect"
 	"go.f0o.dev/version-intercept/router"
 )
 
@@ -34,19 +33,19 @@ var greetings = map[string]string{
 //
 // Arguments:
 //   - ctx: The request context carrying the negotiated microversion.
-//   - req: The Connect request wrapping HelloRequest.
+//   - req: The HelloRequest payload.
 //
-// Returns the Connect response wrapping HelloResponse.
-func (s *Service) Hello(ctx context.Context, req *connect.Request[greeterv1.HelloRequest]) (*connect.Response[greeterv1.HelloResponse], error) {
-	name := req.Msg.GetName()
+// Returns the HelloResponse payload.
+func (s *Service) Hello(ctx context.Context, req *greeterv1.HelloRequest) (*greeterv1.HelloResponse, error) {
+	name := req.GetName()
 	if name == "" {
 		name = "World"
 	}
-	if title := strings.TrimSpace(req.Msg.GetTitle()); title != "" {
+	if title := strings.TrimSpace(req.GetTitle()); title != "" {
 		name = title + " " + name
 	}
 
-	greeting, ok := greetings[strings.ToLower(req.Msg.GetLanguage())]
+	greeting, ok := greetings[strings.ToLower(req.GetLanguage())]
 	if !ok {
 		greeting = greetings["en"]
 	}
@@ -56,10 +55,10 @@ func (s *Service) Hello(ctx context.Context, req *connect.Request[greeterv1.Hell
 		servedBy = fmt.Sprintf("greeter (modern, negotiated %s)", v)
 	}
 
-	return connect.NewResponse(&greeterv1.HelloResponse{
+	return &greeterv1.HelloResponse{
 		Message:  fmt.Sprintf("%s, %s!", greeting, name),
 		ServedBy: servedBy,
-	}), nil
+	}, nil
 }
 
 // Farewell returns a parting message. It is only reachable at microversion 2.0
@@ -67,17 +66,17 @@ func (s *Service) Hello(ctx context.Context, req *connect.Request[greeterv1.Hell
 //
 // Arguments:
 //   - ctx: The request context.
-//   - req: The Connect request wrapping FarewellRequest.
+//   - req: The FarewellRequest payload.
 //
-// Returns the Connect response wrapping FarewellResponse.
-func (s *Service) Farewell(ctx context.Context, req *connect.Request[greeterv1.FarewellRequest]) (*connect.Response[greeterv1.FarewellResponse], error) {
-	name := req.Msg.GetName()
+// Returns the FarewellResponse payload.
+func (s *Service) Farewell(ctx context.Context, req *greeterv1.FarewellRequest) (*greeterv1.FarewellResponse, error) {
+	name := req.GetName()
 	if name == "" {
 		name = "World"
 	}
-	return connect.NewResponse(&greeterv1.FarewellResponse{
+	return &greeterv1.FarewellResponse{
 		Message: fmt.Sprintf("Goodbye, %s!", name),
-	}), nil
+	}, nil
 }
 
 // HelloStream streams repeated greetings, one per requested repeat (default 3).
@@ -87,20 +86,20 @@ func (s *Service) Farewell(ctx context.Context, req *connect.Request[greeterv1.F
 //
 // Arguments:
 //   - ctx: The request context carrying the negotiated microversion.
-//   - req: The Connect request wrapping HelloStreamRequest.
+//   - req: The HelloStreamRequest payload.
 //   - stream: The server stream to which HelloStreamResponse messages are sent.
 //
 // Returns an error if sending a streamed message fails.
-func (s *Service) HelloStream(ctx context.Context, req *connect.Request[greeterv1.HelloStreamRequest], stream *connect.ServerStream[greeterv1.HelloStreamResponse]) error {
-	name := req.Msg.GetName()
+func (s *Service) HelloStream(ctx context.Context, req *greeterv1.HelloStreamRequest, stream greeterv1connect.GreeterServiceHelloStreamServerStream) error {
+	name := req.GetName()
 	if name == "" {
 		name = "World"
 	}
-	if title := strings.TrimSpace(req.Msg.GetTitle()); title != "" {
+	if title := strings.TrimSpace(req.GetTitle()); title != "" {
 		name = title + " " + name
 	}
 
-	greeting, ok := greetings[strings.ToLower(req.Msg.GetLanguage())]
+	greeting, ok := greetings[strings.ToLower(req.GetLanguage())]
 	if !ok {
 		greeting = greetings["en"]
 	}
@@ -110,7 +109,7 @@ func (s *Service) HelloStream(ctx context.Context, req *connect.Request[greeterv
 		servedBy = fmt.Sprintf("greeter (modern, negotiated %s)", v)
 	}
 
-	repeat := req.Msg.GetRepeat()
+	repeat := req.GetRepeat()
 	if repeat <= 0 {
 		repeat = 3
 	}

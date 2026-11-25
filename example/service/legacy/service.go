@@ -9,8 +9,6 @@ import (
 	"context"
 	"fmt"
 
-	"connectrpc.com/connect"
-
 	greeterv1 "go.f0o.dev/version-intercept/example/gen-modern/greeter/v1"
 	"go.f0o.dev/version-intercept/example/gen-modern/greeter/v1/greeterv1connect"
 )
@@ -28,15 +26,15 @@ func New() *Service { return &Service{} }
 //
 // Arguments:
 //   - ctx: The request context.
-//   - req: The Connect request wrapping HelloRequest.
+//   - req: The HelloRequest payload.
 //
-// Returns the Connect response wrapping HelloResponse.
-func (s *Service) Hello(ctx context.Context, req *connect.Request[greeterv1.HelloRequest]) (*connect.Response[greeterv1.HelloResponse], error) {
-	name := req.Msg.GetName()
+// Returns the HelloResponse payload.
+func (s *Service) Hello(ctx context.Context, req *greeterv1.HelloRequest) (*greeterv1.HelloResponse, error) {
+	name := req.GetName()
 	if name == "" {
 		name = "World"
 	}
-	return connect.NewResponse(&greeterv1.HelloResponse{
+	return &greeterv1.HelloResponse{
 		Message: fmt.Sprintf("Hello, %s", name),
-	}), nil
+	}, nil
 }

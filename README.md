@@ -51,24 +51,35 @@ go get go.f0o.dev/version-intercept
 
 ```go
 import (
+    "net/http"
+
+    "connectrpc.com/connect/v2"
+    "connectrpc.com/connect/v2/connecthttp"
     "go.f0o.dev/version-intercept/router"
     routerconnect "go.f0o.dev/version-intercept/router/connect"
 )
 
 r := router.New("greeter", router.WithHeaderConfig(router.DefaultHeaderConfig("greeter")))
 
-// One behavioral impl per version range, all satisfying the same generated iface.
-ic := connect.WithInterceptors(routerconnect.VersioningInterceptor(
-    routerconnect.WithMetrics(m),   // optional *router.Metrics
+ic := routerconnect.VersioningInterceptor(
+    routerconnect.WithMetrics(m), // optional *router.Metrics
     routerconnect.WithLogger(log),
-))
-_, legacy := greeterv1connect.NewGreeterServiceHandler(legacyImpl{}, ic)
-_, modern := greeterv1connect.NewGreeterServiceHandler(modernImpl{}, ic)
+)
 
-r.Register(router.MustParseVersion("1.0"), router.Range{Min: router.Version{1, 0}, Max: router.Version{1, 9}}, legacy)
-r.Register(router.MustParseVersion("2.0"), router.Range{Min: router.Version{2, 0}}, modern) // zero Max == unbounded
+mount := func(impl greeterv1connect.GreeterServiceHandler) http.Handler {
+    srv := connect.NewServer(ic)
+    greeterv1connect.RegisterGreeterServiceHandler(srv, impl)
+    mux := http.NewServeMux()
+    connecthttp.Mount(mux, srv)
+    return mux
+}
 
-http.ListenAndServe(":8080", r) // r is the http.Handler
+r.Register(router.MustParseVersion("1.0"), router.Range{Min: router.Version{1, 0}, Max: router.Version{1, 9}}, mount(legacyImpl{}))
+r.Register(router.MustParseVersion("2.0"), router.Range{Min: router.Version{2, 0}}, mount(modernImpl{})) // zero Max == unbounded
+
+mux := http.NewServeMux()
+mux.Handle("/"+greeterv1connect.GreeterServiceName+"/", r)
+http.ListenAndServe(":8080", mux)
 
 // In handlers:
 v, _ := router.NegotiatedVersion(ctx)
@@ -91,14 +102,21 @@ serves latest.
 
 ```go
 // ConnectRPC
-import autopinconnect "go.f0o.dev/version-intercept/autopin/connect"
+import (
+    "connectrpc.com/connect/v2"
+    "connectrpc.com/connect/v2/connecthttp"
+    autopinconnect "go.f0o.dev/version-intercept/autopin/connect"
+)
 
-sd, _ := (&greeterv1.GreeterService_ServiceDesc{}) // protoreflect.ServiceDescriptor
-client := greeterv1connect.NewGreeterServiceClient(httpc, base,
-    connect.WithInterceptors(autopinconnect.Interceptor(sd,
-        autopinconnect.WithServiceToken("greeter"),
-        autopinconnect.WithVersion("1.0"), // optional explicit pin/override
-    )),
+sd := greeterv1.File_greeter_v1_greeter_proto.Services().ByName("GreeterService")
+client := greeterv1connect.NewGreeterServiceClient(
+    connect.NewClient(
+        connecthttp.NewTransport(httpc, base),
+        autopinconnect.Interceptor(sd,
+            autopinconnect.WithServiceToken("greeter"),
+            autopinconnect.WithVersion("1.0"), // optional explicit pin/override
+        ),
+    ),
 )
 ```
 

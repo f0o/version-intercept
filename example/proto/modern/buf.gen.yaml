@@ -16,7 +16,7 @@ plugins:
   - remote: buf.build/protocolbuffers/go
     out: ../../gen-modern
     opt: paths=source_relative
-  - remote: buf.build/connectrpc/go
+  - remote: buf.build/connectrpc/go:v2.0.2
     out: ../../gen-modern
     opt: paths=source_relative
   - remote: buf.build/grpc/go

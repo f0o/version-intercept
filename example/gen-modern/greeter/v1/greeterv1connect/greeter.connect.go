@@ -12,169 +12,206 @@
 package greeterv1connect
 
 import (
-	connect "connectrpc.com/connect"
+	connect "connectrpc.com/connect/v2"
 	context "context"
-	errors "errors"
-	v1 "github.com/f0o/version-intercept/example/gen-modern/greeter/v1"
-	http "net/http"
-	strings "strings"
+	v1 "go.f0o.dev/version-intercept/example/gen-modern/greeter/v1"
+	sync "sync"
 )
-
-// This is a compile-time assertion to ensure that this generated file and the connect package are
-// compatible. If you get a compiler error that this constant is not defined, this code was
-// generated with a version of connect newer than the one compiled into your binary. You can fix the
-// problem by either regenerating this code with an older version of connect or updating the connect
-// version compiled into your binary.
-const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// GreeterServiceName is the fully-qualified name of the GreeterService service.
 	GreeterServiceName = "greeter.v1.GreeterService"
 )
 
-// These constants are the fully-qualified names of the RPCs defined in this package. They're
-// exposed at runtime as Spec.Procedure and as the final two segments of the HTTP route.
+// These constants are the procedure names of the RPCs defined in this package. They're exposed at
+// runtime as Spec.Procedure and as the final two segments of the HTTP route.
 //
 // Note that these are different from the fully-qualified method names used by
 // google.golang.org/protobuf/reflect/protoreflect. To convert from these constants to
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
-	// GreeterServiceHelloProcedure is the fully-qualified name of the GreeterService's Hello RPC.
+	// GreeterServiceHelloProcedure is the procedure name of the GreeterService's Hello RPC.
 	GreeterServiceHelloProcedure = "/greeter.v1.GreeterService/Hello"
-	// GreeterServiceFarewellProcedure is the fully-qualified name of the GreeterService's Farewell RPC.
+	// GreeterServiceFarewellProcedure is the procedure name of the GreeterService's Farewell RPC.
 	GreeterServiceFarewellProcedure = "/greeter.v1.GreeterService/Farewell"
-	// GreeterServiceHelloStreamProcedure is the fully-qualified name of the GreeterService's
-	// HelloStream RPC.
+	// GreeterServiceHelloStreamProcedure is the procedure name of the GreeterService's HelloStream RPC.
 	GreeterServiceHelloStreamProcedure = "/greeter.v1.GreeterService/HelloStream"
+)
+
+var (
+	greeterServiceHelloSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_greeter_v1_greeter_proto.Services().ByName("GreeterService").Methods().ByName("Hello"),
+			Procedure:  GreeterServiceHelloProcedure,
+		}
+	})
+	greeterServiceFarewellSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_greeter_v1_greeter_proto.Services().ByName("GreeterService").Methods().ByName("Farewell"),
+			Procedure:  GreeterServiceFarewellProcedure,
+		}
+	})
+	greeterServiceHelloStreamSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeServer,
+			Schema:     v1.File_greeter_v1_greeter_proto.Services().ByName("GreeterService").Methods().ByName("HelloStream"),
+			Procedure:  GreeterServiceHelloStreamProcedure,
+		}
+	})
 )
 
 // GreeterServiceClient is a client for the greeter.v1.GreeterService service.
 type GreeterServiceClient interface {
 	// Hello returns a greeting. The title and language request fields (and the
 	// served_by response field) are honored by the server from microversion 2.0.
-	Hello(context.Context, *connect.Request[v1.HelloRequest]) (*connect.Response[v1.HelloResponse], error)
+	Hello(context.Context, *v1.HelloRequest) (*v1.HelloResponse, error)
 	// Farewell returns a parting message. Introduced at microversion 2.0.
-	Farewell(context.Context, *connect.Request[v1.FarewellRequest]) (*connect.Response[v1.FarewellResponse], error)
+	Farewell(context.Context, *v1.FarewellRequest) (*v1.FarewellResponse, error)
 	// HelloStream returns a stream of greetings. Introduced at microversion 2.1.
-	HelloStream(context.Context, *connect.Request[v1.HelloStreamRequest]) (*connect.ServerStreamForClient[v1.HelloStreamResponse], error)
+	HelloStream(context.Context, *v1.HelloStreamRequest) (GreeterServiceHelloStreamClientStream, error)
 }
 
-// NewGreeterServiceClient constructs a client for the greeter.v1.GreeterService service. By
-// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
-// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
-// connect.WithGRPC() or connect.WithGRPCWeb() options.
-//
-// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
-// http://api.acme.com or https://acme.com/grpc).
-func NewGreeterServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) GreeterServiceClient {
-	baseURL = strings.TrimRight(baseURL, "/")
-	greeterServiceMethods := v1.File_greeter_v1_greeter_proto.Services().ByName("GreeterService").Methods()
-	return &greeterServiceClient{
-		hello: connect.NewClient[v1.HelloRequest, v1.HelloResponse](
-			httpClient,
-			baseURL+GreeterServiceHelloProcedure,
-			connect.WithSchema(greeterServiceMethods.ByName("Hello")),
-			connect.WithClientOptions(opts...),
-		),
-		farewell: connect.NewClient[v1.FarewellRequest, v1.FarewellResponse](
-			httpClient,
-			baseURL+GreeterServiceFarewellProcedure,
-			connect.WithSchema(greeterServiceMethods.ByName("Farewell")),
-			connect.WithClientOptions(opts...),
-		),
-		helloStream: connect.NewClient[v1.HelloStreamRequest, v1.HelloStreamResponse](
-			httpClient,
-			baseURL+GreeterServiceHelloStreamProcedure,
-			connect.WithSchema(greeterServiceMethods.ByName("HelloStream")),
-			connect.WithClientOptions(opts...),
-		),
+// NewGreeterServiceClient constructs a client for the greeter.v1.GreeterService service. Multiple
+// service clients may share a single connect.Client.
+func NewGreeterServiceClient(client *connect.Client) GreeterServiceClient {
+	return &greeterServiceClient{client: client}
+}
+
+// GreeterServiceHelloStreamClientStream is the client stream for the GreeterService's HelloStream
+// RPC.
+type GreeterServiceHelloStreamClientStream struct {
+	stream connect.ClientStream
+}
+
+// Receive returns the next response message from the server.
+func (s GreeterServiceHelloStreamClientStream) Receive() (*v1.HelloStreamResponse, error) {
+	var res v1.HelloStreamResponse
+	if err := s.stream.Receive(&res); err != nil {
+		return nil, err
 	}
+	return &res, nil
 }
 
-// greeterServiceClient implements GreeterServiceClient.
-type greeterServiceClient struct {
-	hello       *connect.Client[v1.HelloRequest, v1.HelloResponse]
-	farewell    *connect.Client[v1.FarewellRequest, v1.FarewellResponse]
-	helloStream *connect.Client[v1.HelloStreamRequest, v1.HelloStreamResponse]
-}
-
-// Hello calls greeter.v1.GreeterService.Hello.
-func (c *greeterServiceClient) Hello(ctx context.Context, req *connect.Request[v1.HelloRequest]) (*connect.Response[v1.HelloResponse], error) {
-	return c.hello.CallUnary(ctx, req)
-}
-
-// Farewell calls greeter.v1.GreeterService.Farewell.
-func (c *greeterServiceClient) Farewell(ctx context.Context, req *connect.Request[v1.FarewellRequest]) (*connect.Response[v1.FarewellResponse], error) {
-	return c.farewell.CallUnary(ctx, req)
-}
-
-// HelloStream calls greeter.v1.GreeterService.HelloStream.
-func (c *greeterServiceClient) HelloStream(ctx context.Context, req *connect.Request[v1.HelloStreamRequest]) (*connect.ServerStreamForClient[v1.HelloStreamResponse], error) {
-	return c.helloStream.CallServerStream(ctx, req)
+// Close releases the stream's resources. It is idempotent and is typically deferred to clean up a
+// stream abandoned before io.EOF.
+func (s GreeterServiceHelloStreamClientStream) Close() error {
+	return s.stream.Close()
 }
 
 // GreeterServiceHandler is an implementation of the greeter.v1.GreeterService service.
 type GreeterServiceHandler interface {
 	// Hello returns a greeting. The title and language request fields (and the
 	// served_by response field) are honored by the server from microversion 2.0.
-	Hello(context.Context, *connect.Request[v1.HelloRequest]) (*connect.Response[v1.HelloResponse], error)
+	Hello(context.Context, *v1.HelloRequest) (*v1.HelloResponse, error)
 	// Farewell returns a parting message. Introduced at microversion 2.0.
-	Farewell(context.Context, *connect.Request[v1.FarewellRequest]) (*connect.Response[v1.FarewellResponse], error)
+	Farewell(context.Context, *v1.FarewellRequest) (*v1.FarewellResponse, error)
 	// HelloStream returns a stream of greetings. Introduced at microversion 2.1.
-	HelloStream(context.Context, *connect.Request[v1.HelloStreamRequest], *connect.ServerStream[v1.HelloStreamResponse]) error
+	HelloStream(context.Context, *v1.HelloStreamRequest, GreeterServiceHelloStreamServerStream) error
 }
 
-// NewGreeterServiceHandler builds an HTTP handler from the service implementation. It returns the
-// path on which to mount the handler and the handler itself.
-//
-// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
-// and JSON codecs. They also support gzip compression.
-func NewGreeterServiceHandler(svc GreeterServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	greeterServiceMethods := v1.File_greeter_v1_greeter_proto.Services().ByName("GreeterService").Methods()
-	greeterServiceHelloHandler := connect.NewUnaryHandler(
-		GreeterServiceHelloProcedure,
-		svc.Hello,
-		connect.WithSchema(greeterServiceMethods.ByName("Hello")),
-		connect.WithHandlerOptions(opts...),
+// RegisterGreeterServiceHandler registers svc as the greeter.v1.GreeterService implementation on
+// server.
+func RegisterGreeterServiceHandler(server *connect.Server, svc GreeterServiceHandler) {
+	adapter := greeterServiceHandler{svc: svc}
+	server.Register(
+		connect.Method{Spec: greeterServiceHelloSpec(), Handler: adapter.hello},
+		connect.Method{Spec: greeterServiceFarewellSpec(), Handler: adapter.farewell},
+		connect.Method{Spec: greeterServiceHelloStreamSpec(), Handler: adapter.helloStream},
 	)
-	greeterServiceFarewellHandler := connect.NewUnaryHandler(
-		GreeterServiceFarewellProcedure,
-		svc.Farewell,
-		connect.WithSchema(greeterServiceMethods.ByName("Farewell")),
-		connect.WithHandlerOptions(opts...),
-	)
-	greeterServiceHelloStreamHandler := connect.NewServerStreamHandler(
-		GreeterServiceHelloStreamProcedure,
-		svc.HelloStream,
-		connect.WithSchema(greeterServiceMethods.ByName("HelloStream")),
-		connect.WithHandlerOptions(opts...),
-	)
-	return "/greeter.v1.GreeterService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case GreeterServiceHelloProcedure:
-			greeterServiceHelloHandler.ServeHTTP(w, r)
-		case GreeterServiceFarewellProcedure:
-			greeterServiceFarewellHandler.ServeHTTP(w, r)
-		case GreeterServiceHelloStreamProcedure:
-			greeterServiceHelloStreamHandler.ServeHTTP(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	})
+}
+
+// GreeterServiceHelloStreamServerStream is the server stream for the GreeterService's HelloStream
+// RPC.
+type GreeterServiceHelloStreamServerStream struct {
+	stream connect.ServerStream
+}
+
+// SendHeaders flushes the response headers without a message. The first Send does this implicitly.
+func (s GreeterServiceHelloStreamServerStream) SendHeaders() error {
+	return s.stream.SendHeaders()
+}
+
+// Send sends a response message to the client.
+func (s GreeterServiceHelloStreamServerStream) Send(res *v1.HelloStreamResponse) error {
+	return s.stream.Send(res)
 }
 
 // UnimplementedGreeterServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedGreeterServiceHandler struct{}
 
-func (UnimplementedGreeterServiceHandler) Hello(context.Context, *connect.Request[v1.HelloRequest]) (*connect.Response[v1.HelloResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("greeter.v1.GreeterService.Hello is not implemented"))
+func (UnimplementedGreeterServiceHandler) Hello(context.Context, *v1.HelloRequest) (*v1.HelloResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "greeter.v1.GreeterService.Hello is not implemented")
 }
 
-func (UnimplementedGreeterServiceHandler) Farewell(context.Context, *connect.Request[v1.FarewellRequest]) (*connect.Response[v1.FarewellResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("greeter.v1.GreeterService.Farewell is not implemented"))
+func (UnimplementedGreeterServiceHandler) Farewell(context.Context, *v1.FarewellRequest) (*v1.FarewellResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "greeter.v1.GreeterService.Farewell is not implemented")
 }
 
-func (UnimplementedGreeterServiceHandler) HelloStream(context.Context, *connect.Request[v1.HelloStreamRequest], *connect.ServerStream[v1.HelloStreamResponse]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("greeter.v1.GreeterService.HelloStream is not implemented"))
+func (UnimplementedGreeterServiceHandler) HelloStream(context.Context, *v1.HelloStreamRequest, GreeterServiceHelloStreamServerStream) error {
+	return connect.NewError(connect.CodeUnimplemented, "greeter.v1.GreeterService.HelloStream is not implemented")
+}
+
+type greeterServiceClient struct {
+	client *connect.Client
+}
+
+func (c *greeterServiceClient) Hello(ctx context.Context, req *v1.HelloRequest) (*v1.HelloResponse, error) {
+	var res v1.HelloResponse
+	if err := c.client.CallUnary(ctx, greeterServiceHelloSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *greeterServiceClient) Farewell(ctx context.Context, req *v1.FarewellRequest) (*v1.FarewellResponse, error) {
+	var res v1.FarewellResponse
+	if err := c.client.CallUnary(ctx, greeterServiceFarewellSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *greeterServiceClient) HelloStream(ctx context.Context, req *v1.HelloStreamRequest) (GreeterServiceHelloStreamClientStream, error) {
+	stream, err := c.client.CallServerStream(ctx, greeterServiceHelloStreamSpec(), req)
+	if err != nil {
+		return GreeterServiceHelloStreamClientStream{}, err
+	}
+	return GreeterServiceHelloStreamClientStream{stream: stream}, nil
+}
+
+type greeterServiceHandler struct{ svc GreeterServiceHandler }
+
+func (h greeterServiceHandler) hello(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.HelloRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.Hello(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h greeterServiceHandler) farewell(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.FarewellRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.Farewell(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h greeterServiceHandler) helloStream(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.HelloStreamRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	return h.svc.HelloStream(ctx, &req, GreeterServiceHelloStreamServerStream{stream: stream})
 }

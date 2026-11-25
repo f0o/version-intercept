@@ -1,16 +1,16 @@
-// Package routerconnect provides the ConnectRPC adapter for version-intercept:
-// a connect.Interceptor that enforces the microversion annotations declared on a
-// service's protobuf descriptors. It is a thin adapter over the framework-neutral
-// enforcement engine in the core router package, translating engine outcomes to
-// connect.Code and reading/writing ConnectRPC headers.
+// Package routerconnect provides the ConnectRPC v2 adapter for version-intercept:
+// a connect.ServerInterceptor that enforces the microversion annotations
+// declared on a service's protobuf descriptors. It is a thin adapter over the
+// framework-neutral enforcement engine in the core router package, translating
+// engine outcomes to connect.Code and reading/writing ConnectRPC metadata via
+// connect.CallInfo.
 package routerconnect
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 
-	"connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -21,8 +21,14 @@ import (
 // the negotiated microversion.
 const DeprecationHeader = "Deprecation"
 
+// options configures the versioning server interceptor.
+type options struct {
+	metrics *router.Metrics
+	logger  *slog.Logger
+}
+
 // Option configures a VersioningInterceptor at construction time.
-type Option func(*versioningInterceptor)
+type Option func(*options)
 
 // WithMetrics enables Prometheus instrumentation using the supplied Metrics.
 // When omitted the interceptor records no metrics, keeping instrumentation fully
@@ -33,7 +39,7 @@ type Option func(*versioningInterceptor)
 //
 // Returns an Option applying the metrics.
 func WithMetrics(m *router.Metrics) Option {
-	return func(i *versioningInterceptor) { i.metrics = m }
+	return func(o *options) { o.metrics = m }
 }
 
 // WithLogger enables structured logging of version-enforcement events via the
@@ -44,94 +50,96 @@ func WithMetrics(m *router.Metrics) Option {
 //
 // Returns an Option applying the logger.
 func WithLogger(l *slog.Logger) Option {
-	return func(i *versioningInterceptor) { i.logger = l }
+	return func(o *options) { o.logger = l }
 }
 
-// VersioningInterceptor returns a connect.Interceptor that enforces microversion
-// annotations. It relies on the negotiated version stored in the request context
-// (by the HTTP Router or an upstream handler).
+// VersioningInterceptor returns a connect.ServerInterceptor that enforces
+// microversion annotations across both unary and streaming RPCs. It relies on
+// the negotiated version stored in the request context (by the HTTP Router or
+// an upstream handler), rejects methods outside their lifecycle, gates request
+// and response fields, sets the Deprecation response header when appropriate,
+// recovers from handler panics, and records opt-in metrics.
 //
 // Arguments:
 //   - opts: Optional configuration such as WithMetrics and WithLogger.
 //
-// Returns the configured interceptor.
-func VersioningInterceptor(opts ...Option) connect.Interceptor {
-	i := &versioningInterceptor{}
+// Returns the configured server interceptor.
+func VersioningInterceptor(opts ...Option) connect.ServerInterceptor {
+	var o options
 	for _, opt := range opts {
-		opt(i)
+		opt(&o)
 	}
-	return i
-}
+	return func(next connect.ServerFunc) connect.ServerFunc {
+		return func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) (err error) {
+			version, ok := router.NegotiatedVersion(ctx)
+			apiVersion := "unknown"
+			if ok {
+				apiVersion = version.String()
+			}
+			defer func() {
+				if r := recover(); r != nil {
+					logPanic(o.logger, spec.Procedure, r)
+					err = connect.NewError(connect.CodeInternal, router.NewInternalError(r).Message)
+				}
+				o.metrics.Record(spec.Procedure, apiVersion, resultCode(err))
+			}()
 
-// versioningInterceptor implements connect.Interceptor.
-type versioningInterceptor struct {
-	metrics *router.Metrics
-	logger  *slog.Logger
+			if !ok {
+				return next(ctx, spec, stream)
+			}
+
+			md := methodDescriptor(spec)
+			if md == nil {
+				return next(ctx, spec, stream)
+			}
+
+			lifecycle := router.MethodLifecycleOf(md)
+			if !lifecycle.Available(version) {
+				logRejection(o.logger, spec.Procedure, version)
+				return connect.NewError(connect.CodeUnimplemented, router.NewUnimplementedError(string(md.FullName()), version).Message)
+			}
+			if lifecycle.IsDeprecated(version) {
+				if info, hasInfo := connect.CallInfoForServerContext(ctx); hasInfo {
+					info.ResponseHeader().Set(DeprecationHeader, "true")
+				}
+			}
+
+			wrapped := &gatingServerStream{
+				ServerStream: stream,
+				version:      version,
+				cloneOnSend:  spec.StreamType != connect.StreamTypeUnary,
+			}
+			return next(ctx, spec, wrapped)
+		}
+	}
 }
 
 // logRejection emits a debug record when a method is rejected as unavailable.
-func (i *versioningInterceptor) logRejection(procedure string, v router.Version) {
-	if i.logger == nil {
+//
+// Arguments:
+//   - logger: The structured logger, or nil to skip logging.
+//   - procedure: The RPC procedure path.
+//   - v: The negotiated microversion.
+func logRejection(logger *slog.Logger, procedure string, v router.Version) {
+	if logger == nil {
 		return
 	}
-	i.logger.Debug("version-intercept: method not available at microversion",
+	logger.Debug("version-intercept: method not available at microversion",
 		"procedure", procedure, "api_version", v.String())
 }
 
 // logPanic emits an error record when a handler panic is recovered.
-func (i *versioningInterceptor) logPanic(procedure string, recovered any) {
-	if i.logger == nil {
+//
+// Arguments:
+//   - logger: The structured logger, or nil to skip logging.
+//   - procedure: The RPC procedure path.
+//   - recovered: The recovered panic value.
+func logPanic(logger *slog.Logger, procedure string, recovered any) {
+	if logger == nil {
 		return
 	}
-	i.logger.Error("version-intercept: recovered panic in handler",
+	logger.Error("version-intercept: recovered panic in handler",
 		"procedure", procedure, "panic", recovered)
-}
-
-// WrapUnary enforces microversion annotations around a unary call, recovers from
-// handler panics, and records a metric for every request.
-func (i *versioningInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
-	return func(ctx context.Context, req connect.AnyRequest) (resp connect.AnyResponse, err error) {
-		version, ok := router.NegotiatedVersion(ctx)
-		apiVersion := "unknown"
-		if ok {
-			apiVersion = version.String()
-		}
-		defer func() {
-			if r := recover(); r != nil {
-				i.logPanic(req.Spec().Procedure, r)
-				err = connect.NewError(connect.CodeInternal, errors.New(router.NewInternalError(r).Message))
-				resp = nil
-			}
-			i.metrics.Record(req.Spec().Procedure, apiVersion, resultCode(err))
-		}()
-
-		if !ok {
-			return next(ctx, req)
-		}
-
-		md := methodDescriptor(req.Spec())
-		if md == nil {
-			return next(ctx, req)
-		}
-
-		lifecycle := router.MethodLifecycleOf(md)
-		if !lifecycle.Available(version) {
-			i.logRejection(req.Spec().Procedure, version)
-			return nil, connect.NewError(connect.CodeUnimplemented, errors.New(router.NewUnimplementedError(string(md.FullName()), version).Message))
-		}
-
-		router.GateMessageAny(req.Any(), version)
-
-		resp, err = next(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		router.GateMessageAny(resp.Any(), version)
-		if lifecycle.IsDeprecated(version) {
-			resp.Header().Set(DeprecationHeader, "true")
-		}
-		return resp, nil
-	}
 }
 
 // resultCode maps a call error to its Connect result code label, "ok" on nil.
@@ -147,78 +155,47 @@ func resultCode(err error) string {
 	return connect.CodeOf(err).String()
 }
 
-// WrapStreamingClient passes streaming client calls through unchanged. Client
-// version selection is handled by the autopin/connect interceptor.
-func (i *versioningInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
-	return next
-}
-
-// WrapStreamingHandler enforces microversion annotations around a streaming
-// handler call: it rejects methods outside their lifecycle, gates fields on
-// received and sent messages, sets the deprecation header, and records a metric.
-func (i *versioningInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
-	return func(ctx context.Context, conn connect.StreamingHandlerConn) (err error) {
-		version, ok := router.NegotiatedVersion(ctx)
-		apiVersion := "unknown"
-		if ok {
-			apiVersion = version.String()
-		}
-		defer func() {
-			if r := recover(); r != nil {
-				i.logPanic(conn.Spec().Procedure, r)
-				err = connect.NewError(connect.CodeInternal, errors.New(router.NewInternalError(r).Message))
-			}
-			i.metrics.Record(conn.Spec().Procedure, apiVersion, resultCode(err))
-		}()
-
-		if !ok {
-			return next(ctx, conn)
-		}
-
-		md := methodDescriptor(conn.Spec())
-		if md == nil {
-			return next(ctx, conn)
-		}
-
-		lifecycle := router.MethodLifecycleOf(md)
-		if !lifecycle.Available(version) {
-			i.logRejection(conn.Spec().Procedure, version)
-			return connect.NewError(connect.CodeUnimplemented, errors.New(router.NewUnimplementedError(string(md.FullName()), version).Message))
-		}
-		if lifecycle.IsDeprecated(version) {
-			conn.ResponseHeader().Set(DeprecationHeader, "true")
-		}
-
-		return next(ctx, &gatingHandlerConn{StreamingHandlerConn: conn, version: version})
-	}
-}
-
-// gatingHandlerConn wraps a StreamingHandlerConn to gate fields on messages
+// gatingServerStream wraps a connect.ServerStream to gate fields on messages
 // received from and sent to the client at the negotiated version.
-type gatingHandlerConn struct {
-	connect.StreamingHandlerConn
-	version router.Version
+type gatingServerStream struct {
+	connect.ServerStream
+	version     router.Version
+	cloneOnSend bool
 }
 
 // Receive gates fields on the received message in place.
-func (c *gatingHandlerConn) Receive(msg any) error {
-	if err := c.StreamingHandlerConn.Receive(msg); err != nil {
+//
+// Arguments:
+//   - msg: The destination message populated by the underlying stream.
+//
+// Returns any error reported by the underlying Receive call.
+func (s *gatingServerStream) Receive(msg any) error {
+	if err := s.ServerStream.Receive(msg); err != nil {
 		return err
 	}
-	router.GateMessageAny(msg, c.version)
+	router.GateMessageAny(msg, s.version)
 	return nil
 }
 
-// Send gates fields on a clone so the caller's value is not mutated.
-func (c *gatingHandlerConn) Send(msg any) error {
+// Send gates fields on outgoing messages, cloning first for streaming calls so
+// the caller's message value is not mutated.
+//
+// Arguments:
+//   - msg: The outgoing message to send.
+//
+// Returns any error reported by the underlying Send call.
+func (s *gatingServerStream) Send(msg any) error {
 	if pm, ok := msg.(proto.Message); ok && pm != nil {
-		return c.StreamingHandlerConn.Send(router.GateClone(pm, c.version))
+		if s.cloneOnSend {
+			return s.ServerStream.Send(router.GateClone(pm, s.version))
+		}
+		router.GateMessage(pm, s.version)
 	}
-	return c.StreamingHandlerConn.Send(msg)
+	return s.ServerStream.Send(msg)
 }
 
 // methodDescriptor extracts the protoreflect.MethodDescriptor attached to the
-// connect spec via WithSchema, or nil when unavailable.
+// connect spec via Schema, or nil when unavailable.
 //
 // Arguments:
 //   - spec: The connect spec for the current call.

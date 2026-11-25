@@ -1,13 +1,15 @@
-// streaming_test.go verifies the ConnectRPC adapter's streaming enforcement:
-// method-lifecycle rejection, field gating on received and sent messages, and
-// panic recovery mapping to CodeInternal.
+// streaming_test.go verifies the ConnectRPC v2 adapter's enforcement across
+// unary and streaming RPCs: method-lifecycle rejection, field gating on
+// received and sent messages (including clone-on-send for streams), and panic
+// recovery mapping to CodeInternal.
 package routerconnect
 
 import (
 	"context"
+	"io"
 	"testing"
 
-	"connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -15,33 +17,32 @@ import (
 	"go.f0o.dev/version-intercept/router/testfixture"
 )
 
-// fakeHandlerConn is a minimal connect.StreamingHandlerConn for tests.
-type fakeHandlerConn struct {
-	connect.StreamingHandlerConn
+// fakeServerStream is a minimal connect.ServerStream for tests.
+type fakeServerStream struct {
 	spec     connect.Spec
 	incoming []proto.Message
 	sent     []proto.Message
 	recvIdx  int
 }
 
-func (c *fakeHandlerConn) Spec() connect.Spec { return c.spec }
+func (s *fakeServerStream) SendHeaders() error { return nil }
 
-func (c *fakeHandlerConn) Receive(msg any) error {
-	if c.recvIdx >= len(c.incoming) {
-		return connect.NewError(connect.CodeUnknown, context.Canceled)
+func (s *fakeServerStream) Receive(msg any) error {
+	if s.recvIdx >= len(s.incoming) {
+		return io.EOF
 	}
-	src := c.incoming[c.recvIdx]
-	c.recvIdx++
+	src := s.incoming[s.recvIdx]
+	s.recvIdx++
 	proto.Merge(msg.(proto.Message), src)
 	return nil
 }
 
-func (c *fakeHandlerConn) Send(msg any) error {
-	c.sent = append(c.sent, proto.Clone(msg.(proto.Message)))
+func (s *fakeServerStream) Send(msg any) error {
+	s.sent = append(s.sent, proto.Clone(msg.(proto.Message)))
 	return nil
 }
 
-func methodSpec(t *testing.T, method string) connect.Spec {
+func methodSpec(t *testing.T, method string, streamType connect.StreamType) connect.Spec {
 	t.Helper()
 	md, err := testfixture.Method(method)
 	if err != nil {
@@ -50,7 +51,7 @@ func methodSpec(t *testing.T, method string) connect.Spec {
 	return connect.Spec{
 		Procedure:  "/routertest.v1.GreeterService/" + method,
 		Schema:     md,
-		StreamType: connect.StreamTypeBidi,
+		StreamType: streamType,
 	}
 }
 
@@ -63,18 +64,19 @@ func fixtureMsg(t *testing.T, typeName string, fields map[string]string) proto.M
 	return m
 }
 
-func TestStreamingHandlerRejectsUnavailableMethod(t *testing.T) {
-	i := &versioningInterceptor{}
-	conn := &fakeHandlerConn{spec: methodSpec(t, "Farewell")}
+func TestHandlerRejectsUnavailableMethod(t *testing.T) {
+	ic := VersioningInterceptor()
+	spec := methodSpec(t, "Farewell", connect.StreamTypeBidi)
+	stream := &fakeServerStream{spec: spec}
 	ctx := router.WithNegotiatedVersion(context.Background(), router.Version{Major: 1})
 
 	called := false
-	next := connect.StreamingHandlerFunc(func(ctx context.Context, c connect.StreamingHandlerConn) error {
+	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, s connect.ServerStream) error {
 		called = true
 		return nil
 	})
 
-	err := i.WrapStreamingHandler(next)(ctx, conn)
+	err := ic(next)(ctx, spec, stream)
 	if err == nil || connect.CodeOf(err) != connect.CodeUnimplemented {
 		t.Fatalf("Farewell at 1.0 = %v, want CodeUnimplemented", err)
 	}
@@ -84,47 +86,87 @@ func TestStreamingHandlerRejectsUnavailableMethod(t *testing.T) {
 }
 
 func TestStreamingHandlerGatesReceiveAndSend(t *testing.T) {
-	i := &versioningInterceptor{}
-	conn := &fakeHandlerConn{
-		spec:     methodSpec(t, "Hello"),
+	ic := VersioningInterceptor()
+	spec := methodSpec(t, "Hello", connect.StreamTypeBidi)
+	stream := &fakeServerStream{
+		spec:     spec,
 		incoming: []proto.Message{fixtureMsg(t, "HelloRequest", map[string]string{"name": "Ada", "title": "Dr.", "language": "de"})},
 	}
 	ctx := router.WithNegotiatedVersion(context.Background(), router.Version{Major: 1})
+	resp := fixtureMsg(t, "HelloResponse", map[string]string{"message": "hi", "served_by": "modern"})
 
-	next := connect.StreamingHandlerFunc(func(ctx context.Context, c connect.StreamingHandlerConn) error {
+	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, s connect.ServerStream) error {
 		got := fixtureMsg(t, "HelloRequest", nil)
-		if err := c.Receive(got); err != nil {
+		if err := s.Receive(got); err != nil {
 			return err
 		}
 		gm := got.ProtoReflect()
 		if gm.Get(gm.Descriptor().Fields().ByName("title")).String() != "" {
 			t.Errorf("received title not gated at 1.0")
 		}
-		return c.Send(fixtureMsg(t, "HelloResponse", map[string]string{"message": "hi", "served_by": "modern"}))
+		return s.Send(resp)
 	})
 
-	if err := i.WrapStreamingHandler(next)(ctx, conn); err != nil {
+	if err := ic(next)(ctx, spec, stream); err != nil {
 		t.Fatalf("stream handler: %v", err)
 	}
-	if len(conn.sent) != 1 {
-		t.Fatalf("sent count = %d, want 1", len(conn.sent))
+	if len(stream.sent) != 1 {
+		t.Fatalf("sent count = %d, want 1", len(stream.sent))
 	}
-	sent := conn.sent[0].ProtoReflect()
+	sent := stream.sent[0].ProtoReflect()
+	if sent.Get(sent.Descriptor().Fields().ByName(protoreflect.Name("served_by"))).String() != "" {
+		t.Errorf("sent served_by not gated at 1.0")
+	}
+	orig := resp.ProtoReflect()
+	if orig.Get(orig.Descriptor().Fields().ByName(protoreflect.Name("served_by"))).String() != "modern" {
+		t.Errorf("streaming Send mutated caller message")
+	}
+}
+
+func TestUnaryHandlerGatesReceiveAndSend(t *testing.T) {
+	ic := VersioningInterceptor()
+	spec := methodSpec(t, "Hello", connect.StreamTypeUnary)
+	stream := &fakeServerStream{
+		spec:     spec,
+		incoming: []proto.Message{fixtureMsg(t, "HelloRequest", map[string]string{"name": "Ada", "title": "Dr.", "language": "de"})},
+	}
+	ctx := router.WithNegotiatedVersion(context.Background(), router.Version{Major: 1})
+
+	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, s connect.ServerStream) error {
+		got := fixtureMsg(t, "HelloRequest", nil)
+		if err := s.Receive(got); err != nil {
+			return err
+		}
+		gm := got.ProtoReflect()
+		if gm.Get(gm.Descriptor().Fields().ByName("title")).String() != "" {
+			t.Errorf("received title not gated at 1.0")
+		}
+		return s.Send(fixtureMsg(t, "HelloResponse", map[string]string{"message": "hi", "served_by": "modern"}))
+	})
+
+	if err := ic(next)(ctx, spec, stream); err != nil {
+		t.Fatalf("unary handler: %v", err)
+	}
+	if len(stream.sent) != 1 {
+		t.Fatalf("sent count = %d, want 1", len(stream.sent))
+	}
+	sent := stream.sent[0].ProtoReflect()
 	if sent.Get(sent.Descriptor().Fields().ByName(protoreflect.Name("served_by"))).String() != "" {
 		t.Errorf("sent served_by not gated at 1.0")
 	}
 }
 
 func TestStreamingHandlerRecoversPanic(t *testing.T) {
-	i := &versioningInterceptor{}
-	conn := &fakeHandlerConn{spec: methodSpec(t, "Hello")}
+	ic := VersioningInterceptor()
+	spec := methodSpec(t, "Hello", connect.StreamTypeBidi)
+	stream := &fakeServerStream{spec: spec}
 	ctx := router.WithNegotiatedVersion(context.Background(), router.Version{Major: 2})
 
-	next := connect.StreamingHandlerFunc(func(ctx context.Context, c connect.StreamingHandlerConn) error {
+	next := connect.ServerFunc(func(ctx context.Context, spec connect.Spec, s connect.ServerStream) error {
 		panic("stream boom")
 	})
 
-	err := i.WrapStreamingHandler(next)(ctx, conn)
+	err := ic(next)(ctx, spec, stream)
 	if err == nil || connect.CodeOf(err) != connect.CodeInternal {
 		t.Fatalf("recovered stream panic = %v, want CodeInternal", err)
 	}

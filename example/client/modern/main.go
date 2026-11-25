@@ -1,5 +1,5 @@
 // Command modern is the T3 client: it was code-generated at T2 from the full
-// 2.1 proto snapshot (example/protos/modern). Its generated descriptor carries
+// 2.1 proto snapshot (example/proto/modern). Its generated descriptor carries
 // service_versioning{max:"2.1"}, so it auto-pins to microversion 2.1 purely by
 // reading its OWN compiled-in annotation — no hardcoded version string. Its
 // types include the 2.0 title/language/served_by fields and the Farewell method,
@@ -12,13 +12,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
-	"connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
 
-	greeterv1 "github.com/f0o/version-intercept/example/gen-modern/greeter/v1"
-	"github.com/f0o/version-intercept/example/gen-modern/greeter/v1/greeterv1connect"
-	"github.com/f0o/version-intercept/example/internal/exampleclient"
+	greeterv1 "go.f0o.dev/version-intercept/example/gen-modern/greeter/v1"
+	"go.f0o.dev/version-intercept/example/gen-modern/greeter/v1/greeterv1connect"
+	"go.f0o.dev/version-intercept/example/internal/exampleclient"
 )
 
 // serviceDescriptor is this client's OWN frozen service descriptor, from which
@@ -38,8 +39,8 @@ func bad(what, detail string) {
 }
 
 func main() {
-	autoPin, pinned := exampleclient.AutoPinOption(serviceDescriptor)
-	client := greeterv1connect.NewGreeterServiceClient(exampleclient.HTTPClient(), exampleclient.BaseURL, autoPin)
+	autoPin, pinned := exampleclient.AutoPinInterceptor(serviceDescriptor)
+	client := greeterv1connect.NewGreeterServiceClient(exampleclient.NewConnectClient(autoPin))
 
 	fmt.Println("modern client: T3, compiled from the full 2.1 proto snapshot.")
 	fmt.Printf("auto-pinned microversion (read from its own descriptor) = %s\n", pinned)
@@ -62,22 +63,22 @@ func main() {
 func demoAutoPinned(client greeterv1connect.GreeterServiceClient) {
 	fmt.Println("=== auto-pinned 2.1 behavior ===")
 
-	if resp, err := client.Hello(context.Background(), connect.NewRequest(&greeterv1.HelloRequest{
+	if resp, err := client.Hello(context.Background(), &greeterv1.HelloRequest{
 		Name:     "Turing",
 		Title:    "Dr.",
 		Language: "de",
-	})); err != nil {
+	}); err != nil {
 		bad("Hello (title/language honored)", "unexpected error: "+err.Error())
-	} else if resp.Msg.GetServedBy() != "" && resp.Msg.GetMessage() == "Hallo, Dr. Turing!" {
-		ok("Hello honors title/language, sets served_by", fmt.Sprintf("message=%q served_by=%q", resp.Msg.GetMessage(), resp.Msg.GetServedBy()))
+	} else if resp.GetServedBy() != "" && resp.GetMessage() == "Hallo, Dr. Turing!" {
+		ok("Hello honors title/language, sets served_by", fmt.Sprintf("message=%q served_by=%q", resp.GetMessage(), resp.GetServedBy()))
 	} else {
-		bad("Hello should honor 2.0 fields", fmt.Sprintf("message=%q served_by=%q", resp.Msg.GetMessage(), resp.Msg.GetServedBy()))
+		bad("Hello should honor 2.0 fields", fmt.Sprintf("message=%q served_by=%q", resp.GetMessage(), resp.GetServedBy()))
 	}
 
-	if resp, err := client.Farewell(context.Background(), connect.NewRequest(&greeterv1.FarewellRequest{Name: "Hopper"})); err != nil {
+	if resp, err := client.Farewell(context.Background(), &greeterv1.FarewellRequest{Name: "Hopper"}); err != nil {
 		bad("Farewell (introduced at 2.0)", "unexpected error: "+err.Error())
 	} else {
-		ok("Farewell allowed at 2.1", fmt.Sprintf("message=%q", resp.Msg.GetMessage()))
+		ok("Farewell allowed at 2.1", fmt.Sprintf("message=%q", resp.GetMessage()))
 	}
 
 	demoHelloStream(client)
@@ -87,30 +88,34 @@ func demoAutoPinned(client greeterv1connect.GreeterServiceClient) {
 // microversion 2.1). It verifies the expected number of messages stream back and
 // that each carries the served_by field honored at 2.1.
 func demoHelloStream(client greeterv1connect.GreeterServiceClient) {
-	stream, err := client.HelloStream(context.Background(), connect.NewRequest(&greeterv1.HelloStreamRequest{
+	stream, err := client.HelloStream(context.Background(), &greeterv1.HelloStreamRequest{
 		Name:     "Lovelace",
 		Language: "fr",
 		Repeat:   3,
-	}))
+	})
 	if err != nil {
 		bad("HelloStream (introduced at 2.1)", "unexpected error: "+err.Error())
 		return
 	}
+	defer func() { _ = stream.Close() }()
 
 	var count int
 	var last string
 	var servedBySeen bool
-	for stream.Receive() {
-		msg := stream.Msg()
+	for {
+		msg, recvErr := stream.Receive()
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		if recvErr != nil {
+			bad("HelloStream receive", "stream error: "+recvErr.Error())
+			return
+		}
 		count++
 		last = msg.GetMessage()
 		if msg.GetServedBy() != "" {
 			servedBySeen = true
 		}
-	}
-	if err := stream.Err(); err != nil {
-		bad("HelloStream receive", "stream error: "+err.Error())
-		return
 	}
 
 	if count == 3 && servedBySeen {
@@ -126,22 +131,22 @@ func demoHelloStream(client greeterv1connect.GreeterServiceClient) {
 func demoExplicitLegacyOverride() {
 	fmt.Println("\n=== explicit override to 1.0 (same modern binary) ===")
 
-	client := greeterv1connect.NewGreeterServiceClient(exampleclient.HTTPClient(), exampleclient.BaseURL, exampleclient.OverrideOption("1.0"))
-	resp, err := client.Hello(context.Background(), connect.NewRequest(&greeterv1.HelloRequest{
+	client := greeterv1connect.NewGreeterServiceClient(exampleclient.NewConnectClient(exampleclient.OverrideInterceptor("1.0")))
+	resp, err := client.Hello(context.Background(), &greeterv1.HelloRequest{
 		Name:     "Grace",
 		Title:    "Dr.",
 		Language: "de",
-	}))
+	})
 	switch {
 	case err != nil:
 		bad("override 1.0 Hello", "unexpected error: "+err.Error())
-	case resp.Msg.GetServedBy() == "" && resp.Msg.GetMessage() == "Hello, Grace":
-		ok("server gates 2.0 fields at 1.0", fmt.Sprintf("message=%q served_by=%q", resp.Msg.GetMessage(), resp.Msg.GetServedBy()))
+	case resp.GetServedBy() == "" && resp.GetMessage() == "Hello, Grace":
+		ok("server gates 2.0 fields at 1.0", fmt.Sprintf("message=%q served_by=%q", resp.GetMessage(), resp.GetServedBy()))
 	default:
-		bad("1.0 should gate 2.0 fields", fmt.Sprintf("message=%q served_by=%q", resp.Msg.GetMessage(), resp.Msg.GetServedBy()))
+		bad("1.0 should gate 2.0 fields", fmt.Sprintf("message=%q served_by=%q", resp.GetMessage(), resp.GetServedBy()))
 	}
 
-	if _, err := client.Farewell(context.Background(), connect.NewRequest(&greeterv1.FarewellRequest{Name: "Hopper"})); err != nil {
+	if _, err := client.Farewell(context.Background(), &greeterv1.FarewellRequest{Name: "Hopper"}); err != nil {
 		ok("Farewell rejected at 1.0 (as expected)", connectSummary(err))
 	} else {
 		bad("Farewell should be rejected at 1.0", "call unexpectedly succeeded")

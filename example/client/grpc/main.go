@@ -18,8 +18,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	autopingrpc "github.com/f0o/version-intercept/autopin/grpc"
-	greeterv1 "github.com/f0o/version-intercept/example/gen/greeter/v1"
+	autopingrpc "go.f0o.dev/version-intercept/autopin/grpc"
+	greeterv1 "go.f0o.dev/version-intercept/example/gen-modern/greeter/v1"
 )
 
 // grpcAddr is the raw-gRPC example server address.

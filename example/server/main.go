@@ -20,7 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	"connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/net/http2"
@@ -45,6 +46,22 @@ func main() {
 	}
 }
 
+// mountHandler creates a connect.Server with the shared versioning interceptor,
+// registers impl onto it, and mounts it onto a dedicated http.ServeMux.
+//
+// Arguments:
+//   - ic: The versioning server interceptor.
+//   - impl: The GreeterServiceHandler implementation for a version range.
+//
+// Returns the HTTP handler serving the registered Greeter service.
+func mountHandler(ic connect.ServerInterceptor, impl greeterv1connect.GreeterServiceHandler) http.Handler {
+	server := connect.NewServer(ic)
+	greeterv1connect.RegisterGreeterServiceHandler(server, impl)
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, server)
+	return mux
+}
+
 // run configures and runs the server until it receives a termination signal,
 // then shuts down gracefully. It returns a non-nil error only on an unexpected
 // startup or serving failure.
@@ -55,26 +72,24 @@ func run() error {
 		return err
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	interceptors := connect.WithInterceptors(routerconnect.VersioningInterceptor(
+	ic := routerconnect.VersioningInterceptor(
 		routerconnect.WithMetrics(metrics),
 		routerconnect.WithLogger(logger),
-	))
-
-	servicePath, legacyHandler := greeterv1connect.NewGreeterServiceHandler(legacy.New(), interceptors)
-	_, modernHandler := greeterv1connect.NewGreeterServiceHandler(modern.New(), interceptors)
+	)
 
 	r := router.New("greeter", router.WithHeaderConfig(router.DefaultHeaderConfig("greeter")))
 	r.Register(
 		router.Version{Major: 1, Minor: 0},
 		router.Range{Min: router.Version{Major: 1, Minor: 0}, Max: router.Version{Major: 1, Minor: 9}},
-		legacyHandler,
+		mountHandler(ic, legacy.New()),
 	)
 	r.Register(
 		router.Version{Major: 2, Minor: 1},
 		router.Range{Min: router.Version{Major: 2, Minor: 0}},
-		modernHandler,
+		mountHandler(ic, modern.New()),
 	)
 
+	servicePath := "/" + greeterv1connect.GreeterServiceName + "/"
 	mux := http.NewServeMux()
 	mux.Handle(servicePath, r)
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
